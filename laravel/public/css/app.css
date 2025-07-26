@@ -1,0 +1,10 @@
+#footer {
+    background-color: #808080;
+    color: white;
+}
+#footer a {
+    color: white;
+}
+#footer a:hover {
+    color: #b3b3b3;
+}
