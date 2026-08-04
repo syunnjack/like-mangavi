@@ -7,6 +7,9 @@
     <title>@yield('title', 'マンガ口コミ検索 | 試し読み・購入リンクとリアルな口コミで探す')</title>
     <meta name="description" content="@yield('description', 'マンガ・コミックをキーワードやジャンルから検索できるサイトです。楽天ブックスの試し読み・購入リンクに加えて、実際に読んだ人の口コミも確認できます。')">
     <link rel="canonical" href="{{ url()->current() }}">
+    @if(config('services.ga4.site_verification'))
+    <meta name="google-site-verification" content="{{ config('services.ga4.site_verification') }}">
+    @endif
 
     <meta property="og:site_name" content="マンガ口コミ検索">
     <meta property="og:type" content="website">

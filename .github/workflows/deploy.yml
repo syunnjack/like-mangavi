@@ -2,12 +2,25 @@ name: Deploy to Xserver
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: xserver-production
+  cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment: production
+    env:
+      SSH_PORT: '10022'
+      XSERVER_WEB_IP: '85.131.221.80'
+      GA4_MEASUREMENT_ID: ${{ vars.GA4_MEASUREMENT_ID }}
+      GOOGLE_SITE_VERIFICATION: ${{ vars.GOOGLE_SITE_VERIFICATION }}
     steps:
       - uses: actions/checkout@v4
 
@@ -29,57 +42,158 @@ jobs:
 
       - name: Install dependencies
         working-directory: laravel
-        run: npm install
+        run: npm ci
 
       - name: Build
         working-directory: laravel
         run: npm run build
 
-      - name: Prepare deployment
+      - name: Validate deployment settings and report DNS
+        id: routing
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
         run: |
-          mkdir -p deploy/manga-kuchikomi.jp/public_html
-          rsync -a \
-            --exclude='.env' \
-            --exclude='node_modules/' \
-            --exclude='public/' \
-            --exclude='tests/' \
-            --exclude='database/*.sqlite*' \
-            --exclude='storage/logs/*' \
-            --exclude='storage/framework/cache/data/*' \
-            --exclude='storage/framework/sessions/*' \
-            --exclude='storage/framework/views/*' \
-            laravel/ deploy/manga-kuchikomi.jp/
-          rsync -a laravel/public/ deploy/manga-kuchikomi.jp/public_html/
-          test -f deploy/manga-kuchikomi.jp/vendor/autoload.php
-          test -f deploy/manga-kuchikomi.jp/public_html/index.php
-          test -f deploy/manga-kuchikomi.jp/public_html/.htaccess
-          test ! -e deploy/manga-kuchikomi.jp/.env
-          tar -C deploy/manga-kuchikomi.jp -czf deploy.tar.gz .
+          [[ "$GA4_MEASUREMENT_ID" =~ ^G-[A-Z0-9]+$ ]] || {
+            echo "::error::GA4_MEASUREMENT_ID must be a valid GA4 measurement ID."
+            exit 1
+          }
+          if [[ -n "$GOOGLE_SITE_VERIFICATION" ]] &&
+             [[ ! "$GOOGLE_SITE_VERIFICATION" =~ ^[A-Za-z0-9_-]+$ ]]; then
+            echo "::error::GOOGLE_SITE_VERIFICATION contains unsupported characters."
+            exit 1
+          fi
 
-      - name: Upload deployment archive via SFTP
+          mapfile -t domain_ips < <(getent ahostsv4 manga-kuchikomi.jp | awk '{print $1}' | sort -u)
+          mapfile -t ssh_ips < <(getent ahostsv4 "$SSH_HOST" | awk '{print $1}' | sort -u)
+          if [ "${#ssh_ips[@]}" -eq 0 ]; then
+            echo "::error::SSH_HOST did not resolve to an IPv4 address."
+            exit 1
+          fi
+
+          dns_matches=false
+          if printf '%s\n' "${domain_ips[@]}" | grep -Fqx "$XSERVER_WEB_IP"; then
+            dns_matches=true
+          else
+            echo "::warning::Public DNS still points away from the deployment server. Deployment will continue and use a Host-fixed smoke test."
+          fi
+
+          {
+            echo "dns_matches=$dns_matches"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### DNS routing"
+            echo "- Public A: ${domain_ips[*]:-unresolved}"
+            echo "- Expected Xserver web A: $XSERVER_WEB_IP"
+            echo "- SSH host A: ${ssh_ips[*]}"
+            echo "- Public DNS matches deployment server: $dns_matches"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Package application
+        shell: bash
+        run: |
+          mkdir -p deploy
+          tar \
+            --exclude='.env' \
+            --exclude='node_modules' \
+            --exclude='storage' \
+            --exclude='tests' \
+            --exclude='database/*.sqlite*' \
+            -C laravel \
+            -czf "$GITHUB_WORKSPACE/deploy/release-$GITHUB_SHA.tar.gz" .
+
+      - name: Configure SSH
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          host_keys="$(ssh-keyscan -p "$SSH_PORT" "$SSH_HOST")"
+          if [ -z "$host_keys" ]; then
+            echo "::error::Could not retrieve the Xserver SSH host key."
+            exit 1
+          fi
+          printf '%s\n' "$host_keys" >> ~/.ssh/known_hosts
+
+      - name: Prepare remote upload directory
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USERNAME: ${{ secrets.SSH_USERNAME }}
+        run: |
+          SSH_TARGET="$SSH_USERNAME@$SSH_HOST"
+          SSH_ARGS=(-i ~/.ssh/deploy_key -p "$SSH_PORT")
+          ssh "${SSH_ARGS[@]}" "$SSH_TARGET" 'mkdir -p manga-kuchikomi-app/uploads'
+
+      - name: Upload release without deleting remote files
         uses: wlixcc/SFTP-Deploy-Action@v1.2.4
         with:
           username: ${{ secrets.SSH_USERNAME }}
           server: ${{ secrets.SSH_HOST }}
           port: 10022
           ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
-          local_path: './deploy.tar.gz'
-          remote_path: 'manga-kuchikomi.jp/'
+          local_path: './deploy/release-${{ github.sha }}.tar.gz'
+          remote_path: 'manga-kuchikomi-app/uploads/release-${{ github.sha }}.tar.gz'
           sftp_only: true
           delete_remote_files: false
 
-      - name: Publish application on Xserver
+      - name: Activate release
+        shell: bash
         env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
-          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           SSH_USERNAME: ${{ secrets.SSH_USERNAME }}
         run: |
-          install -m 700 -d ~/.ssh
-          printf '%s' "$SSH_PRIVATE_KEY" > ~/.ssh/xserver
-          chmod 600 ~/.ssh/xserver
-          ssh \
-            -o StrictHostKeyChecking=accept-new \
-            -p 10022 \
-            -i ~/.ssh/xserver \
-            "$SSH_USERNAME@$SSH_HOST" \
-            'cd manga-kuchikomi.jp && tar -xzf deploy.tar.gz && rm deploy.tar.gz'
+          SSH_TARGET="$SSH_USERNAME@$SSH_HOST"
+          ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" "$SSH_TARGET" \
+            "bash -s -- '$GITHUB_SHA' '$GA4_MEASUREMENT_ID' '$GOOGLE_SITE_VERIFICATION'" \
+            < .github/scripts/deploy-xserver.sh
+
+      - name: Verify new Xserver virtual host
+        shell: bash
+        run: |
+          tls_verified=false
+          tls_warning_emitted=false
+          for attempt in {1..6}; do
+            if response="$(
+              curl \
+                --fail \
+                --silent \
+                --show-error \
+                --location \
+                --resolve "manga-kuchikomi.jp:443:$XSERVER_WEB_IP" \
+                https://manga-kuchikomi.jp/
+            )"; then
+              tls_verified=true
+            else
+              if [ "$tls_warning_emitted" = false ]; then
+                echo "::warning::The new Xserver does not yet present a trusted certificate for manga-kuchikomi.jp. Continuing the fixed-IP application smoke test without certificate verification."
+                tls_warning_emitted=true
+              fi
+              response="$(
+                curl \
+                  --insecure \
+                  --fail \
+                  --silent \
+                  --show-error \
+                  --location \
+                  --resolve "manga-kuchikomi.jp:443:$XSERVER_WEB_IP" \
+                  https://manga-kuchikomi.jp/
+              )" || true
+            fi
+            if grep -Fq "gtag/js?id=$GA4_MEASUREMENT_ID" <<< "$response"; then
+              {
+                echo "### Host-fixed production smoke"
+                echo "- URL: https://manga-kuchikomi.jp/"
+                echo "- Forced server: $XSERVER_WEB_IP"
+                echo "- Laravel response and GA4 tag: verified"
+                echo "- Trusted domain certificate: $tls_verified"
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::The new Xserver virtual host did not return the deployed GA4 tag."
+          exit 1

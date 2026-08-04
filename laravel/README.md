@@ -21,6 +21,23 @@ Laravel is a web application framework with expressive, elegant syntax. We belie
 
 Laravel is accessible, powerful, and provides tools required for large, robust applications.
 
+## Production deployment
+
+The `Deploy to Xserver` workflow publishes immutable releases beneath
+`~/manga-kuchikomi-app` and exposes only Laravel's `public` directory through
+`~/manga-kuchikomi.jp/public_html`. The shared production `.env`, SQLite
+database, logs, framework state, and uploaded files survive every release.
+Existing document-root entries are backed up before replacement, and uploaded
+archives and old releases are retained.
+
+Configure `SSH_HOST`, `SSH_USERNAME`, and `SSH_PRIVATE_KEY` as repository
+secrets. Configure `GA4_MEASUREMENT_ID` as a repository variable; the optional
+`GOOGLE_SITE_VERIFICATION` variable accepts the token from Google's HTML meta
+tag. A manual run can deploy before DNS cutover because its smoke test fixes the
+domain to the new Xserver IP. The workflow reports a DNS mismatch as a warning.
+It also reports an untrusted pre-cutover domain certificate while still
+verifying the application response against the fixed server IP.
+
 ## Learning Laravel
 
 Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
