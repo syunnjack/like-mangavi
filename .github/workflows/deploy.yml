@@ -11,10 +11,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          tools: composer:v2
+          coverage: none
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+
+      - name: Install PHP dependencies
+        working-directory: laravel
+        run: composer install --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader
 
       - name: Install dependencies
         working-directory: laravel
@@ -24,14 +35,51 @@ jobs:
         working-directory: laravel
         run: npm run build
 
-      - name: Deploy to Xserver via SFTP
+      - name: Prepare deployment
+        run: |
+          mkdir -p deploy/manga-kuchikomi.jp/public_html
+          rsync -a \
+            --exclude='.env' \
+            --exclude='node_modules/' \
+            --exclude='public/' \
+            --exclude='tests/' \
+            --exclude='database/*.sqlite*' \
+            --exclude='storage/logs/*' \
+            --exclude='storage/framework/cache/data/*' \
+            --exclude='storage/framework/sessions/*' \
+            --exclude='storage/framework/views/*' \
+            laravel/ deploy/manga-kuchikomi.jp/
+          rsync -a laravel/public/ deploy/manga-kuchikomi.jp/public_html/
+          test -f deploy/manga-kuchikomi.jp/vendor/autoload.php
+          test -f deploy/manga-kuchikomi.jp/public_html/index.php
+          test -f deploy/manga-kuchikomi.jp/public_html/.htaccess
+          test ! -e deploy/manga-kuchikomi.jp/.env
+          tar -C deploy/manga-kuchikomi.jp -czf deploy.tar.gz .
+
+      - name: Upload deployment archive via SFTP
         uses: wlixcc/SFTP-Deploy-Action@v1.2.4
         with:
           username: ${{ secrets.SSH_USERNAME }}
           server: ${{ secrets.SSH_HOST }}
           port: 10022
           ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
-          local_path: './laravel/public/*'
-          remote_path: 'manga-kuchikomi.jp/public_html/'
+          local_path: './deploy.tar.gz'
+          remote_path: 'manga-kuchikomi.jp/'
           sftp_only: true
           delete_remote_files: false
+
+      - name: Publish application on Xserver
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_USERNAME: ${{ secrets.SSH_USERNAME }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s' "$SSH_PRIVATE_KEY" > ~/.ssh/xserver
+          chmod 600 ~/.ssh/xserver
+          ssh \
+            -o StrictHostKeyChecking=accept-new \
+            -p 10022 \
+            -i ~/.ssh/xserver \
+            "$SSH_USERNAME@$SSH_HOST" \
+            'cd manga-kuchikomi.jp && tar -xzf deploy.tar.gz && rm deploy.tar.gz'
