@@ -151,12 +151,35 @@ jobs:
             "bash -s -- '$GITHUB_SHA' '$GA4_MEASUREMENT_ID' '$GOOGLE_SITE_VERIFICATION'" \
             < .github/scripts/deploy-xserver.sh
 
+      - name: Verify activated release over SSH
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USERNAME: ${{ secrets.SSH_USERNAME }}
+        run: |
+          SSH_TARGET="$SSH_USERNAME@$SSH_HOST"
+          ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" "$SSH_TARGET" \
+            "test \"\$(readlink \"\$HOME/manga-kuchikomi-app/current\")\" = \"\$HOME/manga-kuchikomi-app/releases/$GITHUB_SHA\" &&
+             test -f \"\$HOME/manga-kuchikomi-app/current/vendor/autoload.php\" &&
+             test -L \"\$HOME/manga-kuchikomi-app/current/.env\" &&
+             test -L \"\$HOME/manga-kuchikomi-app/current/storage\" &&
+             test -s \"\$HOME/manga-kuchikomi-app/shared/database/database.sqlite\" &&
+             test -L \"\$HOME/manga-kuchikomi.jp/public_html/storage\" &&
+             test -f \"\$HOME/manga-kuchikomi.jp/public_html/index.php\" &&
+             grep -Fqx 'GA4_MEASUREMENT_ID=$GA4_MEASUREMENT_ID' \"\$HOME/manga-kuchikomi-app/shared/.env\""
+
       - name: Verify new Xserver virtual host
         shell: bash
+        env:
+          DNS_MATCHES: ${{ steps.routing.outputs.dns_matches }}
         run: |
           tls_verified=false
           tls_warning_emitted=false
-          for attempt in {1..6}; do
+          attempts=1
+          if [ "$DNS_MATCHES" = true ]; then
+            attempts=6
+          fi
+          for attempt in $(seq 1 "$attempts"); do
             if response="$(
               curl \
                 --fail \
@@ -195,5 +218,16 @@ jobs:
             fi
             sleep 10
           done
+          if [ "$DNS_MATCHES" != true ]; then
+            echo "::warning::The fixed-IP request reached Xserver but the domain vhost is not externally available before DNS cutover. The activated release was verified over SSH."
+            {
+              echo "### Host-fixed production smoke"
+              echo "- URL: https://manga-kuchikomi.jp/"
+              echo "- Forced server: $XSERVER_WEB_IP"
+              echo "- Xserver domain vhost: unavailable before DNS cutover"
+              echo "- Activated release over SSH: verified"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           echo "::error::The new Xserver virtual host did not return the deployed GA4 tag."
           exit 1
