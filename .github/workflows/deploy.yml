@@ -17,9 +17,11 @@ jobs:
           node-version: '20'
 
       - name: Install dependencies
+        working-directory: laravel
         run: npm install
 
       - name: Build
+        working-directory: laravel
         run: npm run build
 
       - name: Deploy to Xserver via SFTP
@@ -29,7 +31,7 @@ jobs:
           server: ${{ secrets.SSH_HOST }}
           port: 10022
           ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
-          local_path: './public/*'
+          local_path: './laravel/public/*'
           remote_path: '/home/xs501620/manga-kuchikomi.jp/public_html/'
           sftp_only: true
           delete_remote_files: false
