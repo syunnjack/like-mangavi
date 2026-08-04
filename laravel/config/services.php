@@ -38,6 +38,7 @@ return [
 
     'ga4' => [
         'id' => env('GA4_MEASUREMENT_ID'),
+        'site_verification' => env('GOOGLE_SITE_VERIFICATION'),
     ],
 
 ];
