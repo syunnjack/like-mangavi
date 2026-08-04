@@ -32,6 +32,6 @@ jobs:
           port: 10022
           ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
           local_path: './laravel/public/*'
-          remote_path: '/home/xs501620/manga-kuchikomi.jp/public_html/'
+          remote_path: '/manga-kuchikomi.jp/public_html/'
           sftp_only: true
           delete_remote_files: false
