@@ -66,9 +66,9 @@ class MangaController extends Controller
                     ->get($categoryConfig['endpoint'], array_merge([
                         'format' => 'json',
                         'formatVersion' => 2,
-                        'applicationId' => env('RAKUTEN_APP_ID'),
-                        'accessKey' => env('RAKUTEN_ACCESS_KEY'),
-                        'affiliateId' => env('RAKUTEN_AFFILIATE_ID'),
+                        'applicationId' => config('services.rakuten.app_id'),
+                        'accessKey' => config('services.rakuten.access_key'),
+                        'affiliateId' => config('services.rakuten.affiliate_id'),
                         'title' => $keyword,
                         'hits' => 30,
                     ], $categoryConfig['params']));
@@ -137,9 +137,9 @@ class MangaController extends Controller
                     ->get('https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260701', [
                         'format' => 'json',
                         'formatVersion' => 2,
-                        'applicationId' => env('RAKUTEN_APP_ID'),
-                        'accessKey' => env('RAKUTEN_ACCESS_KEY'),
-                        'affiliateId' => env('RAKUTEN_AFFILIATE_ID'),
+                        'applicationId' => config('services.rakuten.app_id'),
+                        'accessKey' => config('services.rakuten.access_key'),
+                        'affiliateId' => config('services.rakuten.affiliate_id'),
                         'keyword' => $keyword . ' 中古',
                         'hits' => 5,
                     ]);

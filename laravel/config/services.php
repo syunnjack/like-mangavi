@@ -14,6 +14,16 @@ return [
     |
     */
 
+    /*
+     | 楽天ウェブサービス。コントローラから env() を直に呼ぶと、config:cache したときに
+     | null になる。実際にそれで API が400を返し、全ページが0件になっていた。
+     */
+    'rakuten' => [
+        'app_id' => env('RAKUTEN_APP_ID'),
+        'access_key' => env('RAKUTEN_ACCESS_KEY'),
+        'affiliate_id' => env('RAKUTEN_AFFILIATE_ID'),
+    ],
+
     'postmark' => [
         'token' => env('POSTMARK_TOKEN'),
     ],
