@@ -56,33 +56,29 @@ jobs:
           test ! -e deploy/manga-kuchikomi.jp/.env
           tar -C deploy/manga-kuchikomi.jp -czf deploy.tar.gz .
 
-      - name: Upload deployment archive via SFTP
-        uses: wlixcc/SFTP-Deploy-Action@v1.2.4
-        with:
-          username: ${{ secrets.SSH_USERNAME }}
-          server: ${{ secrets.SSH_HOST }}
-          port: 10022
-          ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
-          local_path: './deploy.tar.gz'
-          remote_path: 'manga-kuchikomi.jp/'
-          sftp_only: true
-          delete_remote_files: false
-
-      - name: Publish application on Xserver
+      - name: Upload and publish on Xserver
         env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           SSH_USERNAME: ${{ secrets.SSH_USERNAME }}
         run: |
+          # Docker 版の SFTP アクションは timeout で落ちることがある（成功と失敗が混ざる）。
+          # ランナーから直接 ssh/scp で届ける。maportal で今日通った形。
           install -m 700 -d ~/.ssh
           printf '%s' "$SSH_PRIVATE_KEY" > ~/.ssh/xserver
           chmod 600 ~/.ssh/xserver
-          ssh \
-            -o StrictHostKeyChecking=accept-new \
-            -p 10022 \
-            -i ~/.ssh/xserver \
-            "$SSH_USERNAME@$SSH_HOST" \
-            'cd manga-kuchikomi.jp && tar -xzf deploy.tar.gz && rm deploy.tar.gz                && /opt/php-8.4/bin/php artisan view:clear                && /opt/php-8.4/bin/php artisan config:clear                && /opt/php-8.4/bin/php artisan route:clear'
+          SSH="ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=20 -p 10022 -i ~/.ssh/xserver"
+
+          for i in 1 2 3; do
+            echo "転送 $i 回目"
+            if scp -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=20                  -P 10022 -i ~/.ssh/xserver                  deploy.tar.gz "$SSH_USERNAME@$SSH_HOST:manga-kuchikomi.jp/"; then
+              echo '転送できた'; break
+            fi
+            [ "$i" = 3 ] && { echo 'Xserver に3回とも繋がらない' >&2; exit 1; }
+            sleep 30
+          done
+
+          $SSH "$SSH_USERNAME@$SSH_HOST"             'cd manga-kuchikomi.jp && tar -xzf deploy.tar.gz && rm deploy.tar.gz                && /opt/php-8.4/bin/php artisan view:clear                && /opt/php-8.4/bin/php artisan config:clear                && /opt/php-8.4/bin/php artisan route:clear'
 
       - name: Verify canonical on the live site
         run: |
