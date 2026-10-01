@@ -6,13 +6,19 @@
 
     <title>@yield('title', 'マンガ口コミ検索 | 試し読み・購入リンクとリアルな口コミで探す')</title>
     <meta name="description" content="@yield('description', 'マンガ・コミックをキーワードやジャンルから検索できるサイトです。楽天ブックスの試し読み・購入リンクに加えて、実際に読んだ人の口コミも確認できます。')">
-    <link rel="canonical" href="{{ url()->current() }}">
+    @php
+        // url()->current() はクエリを落とすため、13ジャンルのページがすべて
+        // /search を正規URLとして申告してしまう。内容が変わる条件を残す。
+        $canonicalQuery = array_filter(request()->only(['keyword']), fn ($value) => $value !== null && $value !== '');
+        $canonicalUrl = url()->current() . ($canonicalQuery ? '?' . http_build_query($canonicalQuery) : '');
+    @endphp
+    <link rel="canonical" href="{{ $canonicalUrl }}">
 
     <meta property="og:site_name" content="マンガ口コミ検索">
     <meta property="og:type" content="website">
     <meta property="og:title" content="@yield('title', 'マンガ口コミ検索 | 試し読み・購入リンクとリアルな口コミで探す')">
     <meta property="og:description" content="@yield('description', 'マンガ・コミックをキーワードやジャンルから検索できるサイトです。楽天ブックスの試し読み・購入リンクに加えて、実際に読んだ人の口コミも確認できます。')">
-    <meta property="og:url" content="{{ url()->current() }}">
+    <meta property="og:url" content="{{ $canonicalUrl }}">
     <meta property="og:locale" content="ja_JP">
 
     <meta name="twitter:card" content="summary">

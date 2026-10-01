@@ -82,4 +82,20 @@ jobs:
             -p 10022 \
             -i ~/.ssh/xserver \
             "$SSH_USERNAME@$SSH_HOST" \
-            'cd manga-kuchikomi.jp && tar -xzf deploy.tar.gz && rm deploy.tar.gz'
+            'cd manga-kuchikomi.jp && tar -xzf deploy.tar.gz && rm deploy.tar.gz                && /opt/php-8.4/bin/php artisan view:clear                && /opt/php-8.4/bin/php artisan config:clear                && /opt/php-8.4/bin/php artisan route:clear'
+
+      - name: Verify canonical on the live site
+        run: |
+          # サイトマップに載っているジャンルURLを1本取り、canonical が
+          # keyword を保っているか本番で確かめる。url()->current() はクエリを落とす。
+          U='https://manga-kuchikomi.jp/search?keyword=%E7%95%B0%E4%B8%96%E7%95%8C'
+          for i in 1 2 3 4 5; do
+            BODY=$(curl -sS --max-time 30 "$U" || true)
+            CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 "$U" || true)
+            CANON=$(printf '%s' "$BODY" | grep -o 'rel="canonical" href="[^"]*"' | head -1)
+            echo "試行 $i  HTTP $CODE  $CANON"
+            case "$CANON" in *keyword=*) echo 'canonical が keyword を保っている'; exit 0;; esac
+            sleep 10
+          done
+          echo 'canonical に keyword が入らない。Blade のキャッシュか反映漏れ' >&2
+          exit 1
